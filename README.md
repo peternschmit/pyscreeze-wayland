@@ -3,6 +3,10 @@ PyScreeze
 
 PyScreeze is a simple, cross-platform screenshot module for Python 3.
 
+PyScreeze-wayland is a fork of PyScreeze with additional Wayland support.  On Linux, it abandons Pillow for taking screenshots.  Currently it supports the screenshot tools grim and spectacle, for compositors wlroots and kde, respectively.  Meanwhile support for gnome-screenshot is removed, since gnome-screenshot was deprecated by the GNOME Project.
+
+This package still imports as 'pyscreeze'.
+
 About
 -----
 

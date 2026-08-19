@@ -62,19 +62,6 @@ GRAYSCALE_DEFAULT = True
 # For version 1.0.0, USE_IMAGE_NOT_FOUND_EXCEPTION is set to True by default.
 USE_IMAGE_NOT_FOUND_EXCEPTION = True
 
-GNOMESCREENSHOT_EXISTS = False
-try:
-    if sys.platform.startswith('linux'):
-        whichProc = subprocess.Popen(['which', 'gnome-screenshot'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        GNOMESCREENSHOT_EXISTS = whichProc.wait() == 0
-except OSError as ex:
-    if ex.errno == errno.ENOENT:
-        # if there is no "which" program to find gnome-screenshot, then assume there
-        # is no gnome-screenshot.
-        pass
-    else:
-        raise
-
 SCROT_EXISTS = False
 try:
     if sys.platform.startswith('linux'):
@@ -88,6 +75,32 @@ except OSError as ex:
     else:
         raise
 
+GRIM_EXISTS = False
+try:
+    if sys.platform.startswith('linux'):
+        whichProc = subprocess.Popen(['which', 'grim'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        GRIM_EXISTS = whichProc.wait() == 0
+except OSError as ex:
+    if ex.errno == errno.ENOENT:
+        # if there is no "which" program to find grim, then assume there
+        # is no grim.
+        pass
+    else:
+        raise
+
+SPECTACLE_EXISTS = False
+try:
+    if sys.platform.startswith('linux'):
+        whichProc = subprocess.Popen(['which', 'spectacle'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        SPECTACLE_EXISTS = whichProc.wait() == 0
+except OSError as ex:
+    if ex.errno == errno.ENOENT:
+        # if there is no "which" program to find spectacle, then assume there
+        # is no spectacle.
+        pass
+    else:
+        raise
+
 # On Linux, figure out which window system is being used.
 if sys.platform.startswith('linux'):
     RUNNING_X11 = False
@@ -95,12 +108,23 @@ if sys.platform.startswith('linux'):
     if os.environ.get('XDG_SESSION_TYPE') == 'x11':
         RUNNING_X11 = True
         RUNNING_WAYLAND = False
-    elif os.environ.get('XDG_SESSION_TYPE') == 'wayland':
+    elif os.environ.get('XDG_SESSION_TYPE') == 'wayland' or 'WAYLAND_DISPLAY' in os.environ:
         RUNNING_WAYLAND = True
         RUNNING_X11 = False
-    elif 'WAYLAND_DISPLAY' in os.environ:
-        RUNNING_WAYLAND = True
-        RUNNING_X11 = False
+
+    # If using Wayland, figure out which compositor.
+    USING_KWIN = False
+    USING_WLROOTS = False
+    if RUNNING_WAYLAND:
+        # List of wlroots compositors: https://github.com/solarkraft/awesome-wlroots#compositors
+        WLROOTS_NAMES = {
+                "cagebreak","cardboard","dwl","epd-wm","hikari","hopalong","hyprland","kiwmi",
+                "labwc","laikawm","phoc","river","sway","tinybox","waybox","wayfire","wio"
+        }
+        p = subprocess.run(["ps", "-e", "-o", "comm="], text=True, capture_output=True)
+        comms = {line.strip() for line in p.stdout.splitlines() if line.strip()}
+        USING_KWIN = ("kwin" in comms) or ("kwin_wayland" in comms)
+        USING_WLROOTS = (not USING_KWIN) and bool(comms & WLROOTS_NAMES)
 
 
 if sys.platform == 'win32':
@@ -587,46 +611,25 @@ def _screenshot_linux(imageFilename=None, region=None):
     """
     TODO
     """
-
     if imageFilename is None:
         tmpFilename = '.screenshot%s.png' % (datetime.datetime.now().strftime('%Y-%m%d_%H-%M-%S-%f'))
+        print('tmpFilename:',tmpFilename)
     else:
         tmpFilename = imageFilename
 
-    # Version 9.2.0 introduced using gnome-screenshot for ImageGrab.grab()
-    # on Linux, which is necessary to have screenshots work with Wayland
-    # (the replacement for x11.) Therefore, for 3.7 and later, PyScreeze
-    # uses/requires 9.2.0.
-    if PILLOW_VERSION >= (9, 2, 0) and GNOMESCREENSHOT_EXISTS:
-        # Pillow doesn't need tmpFilename because it works entirely in memory and doesn't
-        # need to save an image file to disk.
-        im = ImageGrab.grab()  # use Pillow's grab() for Pillow 9.2.0 and later.
-
-        if imageFilename is not None:
-            im.save(imageFilename)
-
-        if region is None:
-            # Return the full screenshot.
-            return im
-        else:
-            # Return just a region of the screenshot.
-            assert len(region) == 4, 'region argument must be a tuple of four ints'  # TODO fix this
-            assert isinstance(region[0], int) and isinstance(region[1], int) and isinstance(region[2], int) and isinstance(region[3], int), 'region argument must be a tuple of four ints'
-            im = im.crop((region[0], region[1], region[2] + region[0], region[3] + region[1]))
-            return im
-    elif RUNNING_X11 and SCROT_EXISTS:  # scrot only runs on X11, not on Wayland.
-        # Even if gnome-screenshot exists, use scrot on X11 because gnome-screenshot
-        # has this annoying screen flash effect that you can't disable, but scrot does not.
+    if RUNNING_X11 and SCROT_EXISTS:  # scrot only runs on X11, not on Wayland.
         subprocess.call(['scrot', '-z', tmpFilename])
-    elif GNOMESCREENSHOT_EXISTS:  # gnome-screenshot runs on Wayland and X11.
-        subprocess.call(['gnome-screenshot', '-f', tmpFilename])
-    elif RUNNING_WAYLAND and SCROT_EXISTS and not GNOMESCREENSHOT_EXISTS:
-        raise PyScreezeException(
-            'Your computer uses the Wayland window system. Scrot works on the X11 window system but not Wayland. You must install gnome-screenshot by running `sudo apt install gnome-screenshot`'  # noqa
+    elif USING_WLROOTS and GRIM_EXISTS:
+        subprocess.call(['grim', tmpFilename])
+    elif USING_KWIN and SPECTACLE_EXISTS:
+        print("Spectacle exists")
+        subprocess.call(['spectacle', "-n", "-b", "-f", '-o', tmpFilename])
+    elif RUNNING_WAYLAND and SCROT_EXISTS and (not GRIM_EXISTS or not SPECTACLE_EXISTS): raise PyScreezeException(
+            'Your computer uses the Wayland window system. Scrot works on the X11 window system but not Wayland. You must use a screenshot tool appropriate with your Wayland compositor.  If using wlroots, install grim; if using KWin, install spectacle.'  # noqa
         )
     else:
         raise Exception(
-            'To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`'  # noqa
+            'To take screenshots, you must install Pillow version 9.2.0 or greater and scrot, grim, or KWin depending on your display server and compositor.`'  # noqa
         )
 
     im = Image.open(tmpFilename)
